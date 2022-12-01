@@ -10,6 +10,6 @@ pasta
 mashed potatoes
 casserole
 frozen food
-dinner plate
-burger
-sandwich
+(dinner plate| dinner plates)
+(burger | burgers)
+(sandwich | sandwiches)

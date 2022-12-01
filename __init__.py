@@ -19,7 +19,7 @@ class AbrMicrowave(MycroftSkill):
         # Avaialble heat/power modes
         self.heat_modes = ("low", "medium", "high")
 
-        # time to reheat (in seconds) for 1 unit of food
+        # time to reheat (in seconds) per 1 unit of food
         self.reheat_food = {
             "coffee": 60,
             "water": 60,
@@ -38,19 +38,25 @@ class AbrMicrowave(MycroftSkill):
             "sandwich": 60,
         }
 
+    def _extract_number(self, s: str) -> int:
+        """
+        Extract numbers from a string
+        """
+        str_num = "".join([x for x in s if x.isnumeric()])
+        return round(float(str_num))
+
     def _extract_and_set_time(self, time_entity: str) -> None:
         """
         Extract number from the input string, convert the number to
         seconds, and update state["timer"].
         """
-        time = "".join([x for x in time_entity if x.isnumeric()])
-        time = int(time)
+        time = self._extract_number(time_entity)
         if "second" in time_entity:
             self.state["timer"] = time
         elif "minute" in time_entity:
-            self.state["timer"] = int(time * 60)
+            self.state["timer"] = time * 60
         elif "hour" in time_entity:
-            self.state["timer"] = int(time * 3600)
+            self.state["timer"] = time * 3600
 
     def _time_display_and_update(self) -> None:
         """
@@ -72,6 +78,7 @@ class AbrMicrowave(MycroftSkill):
 
     def initialize(self):
         self.register_entity_file("time.entity")
+        self.register_entity_file("food.entity")
         self.register_entity_file("reheat_food.entity")
         self.register_entity_file("quantity.entity")
 
@@ -91,6 +98,7 @@ class AbrMicrowave(MycroftSkill):
             on_fail="Sorry, I did not catch that",
         )
         if time is not None:
+            self._extract_and_set_time(time)
             self.state["status"] = 1
             self._time_display_and_update()
 
@@ -113,18 +121,44 @@ class AbrMicrowave(MycroftSkill):
         Handles food-specific reheat/heat commands such as
         'heat 2 sandwiches'. Note that that timing information
         is derived from the quantity of food, if the food is part of
-        'reheat_food.entity' -- otherwise TODO: write a food specific method
-        for foods that do not appear in there, with the option of storing
-        new food-specific info.
+        'reheat_food.entity'.
         """
         self.log.info("In REHEAT FOOD SPECIFIC handler")
-        food = message.data["reheat_food"]
-        quantity = message.data["quantity"]
-        time = self.reheat_food[food]  # time per unit of food
-        # time = time * quantity
-        self.state["timer"] = time
-        self.state["status"] = 1
-        self._time_display_and_update()
+        data = message.data
+        if "reheat_food" in data:
+            food = data["reheat_food"]
+            quantity = self._extract_number(data["quantity"])
+            time = self.reheat_food[food]  # time per unit of food
+            # time = round(time * quantity)
+            self.state["timer"] = time
+            self.state["status"] = 1
+            self._time_display_and_update()
+        elif "food" in data and data["food"] not in self.reheat_food:
+            food = data["food"]
+            time = self.get_response(
+                f"Sorry, {food} is not in the database. Please specify the duration.",
+                validator=self._validate_time,
+                num_retries=0,
+                on_fail="Sorry, I did not catch that",
+            )
+            quantity = self._extract_number(data["quantity"])
+            if time is not None:
+                self._extract_and_set_time(time)
+                unit_time = round(self.state["timer"] / quantity)
+                self.state["status"] = 1
+                self._time_display_and_update()
+                # TODO: store new food info in a file so that it does not disappear
+                # when mycroft is restarted.
+                self.reheat_food[food] = unit_time
+                self.log.info(f"Added {food} to the Reheat database.")
+        elif "food" in data and data["food"] in self.reheat_food:
+            food = data["food"]
+            quantity = self._extract_number(data["quantity"])
+            time = self.reheat_food[food]  # time per unit of food
+            # time = round(time * quantity)
+            self.state["timer"] = time
+            self.state["status"] = 1
+            self._time_display_and_update()
 
     # ------------------------------------------------ MISC Intents
 
