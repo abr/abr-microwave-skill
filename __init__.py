@@ -20,7 +20,8 @@ class AbrMicrowave(MycroftSkill):
         self.heat_modes = ("low", "medium", "high")
 
         # time to reheat (in seconds) per 1 unit of food
-        self.reheat_food = {
+        # TODO: add power/heat level info
+        self.reheat_foods = {
             "coffee": 60,
             "water": 60,
             "milk": 60,
@@ -88,7 +89,7 @@ class AbrMicrowave(MycroftSkill):
     def handle_reheat_basic(self, message):
         """
         Handles basic reheat/heat commands that do not
-        contain any time-specific or food-specific information.
+        contain any time-specific or food-specific information (food type and quantity).
         """
         self.log.info("In REHEAT BASIC handler")
         time = self.get_response(
@@ -97,6 +98,8 @@ class AbrMicrowave(MycroftSkill):
             num_retries=0,
             on_fail="Sorry, I did not catch that",
         )
+        if "heat_mode" in message.data:
+            self.state["heat_mode"] = message.data["heat_mode"]
         if time is not None:
             self._extract_and_set_time(time)
             self.state["status"] = 1
@@ -112,6 +115,8 @@ class AbrMicrowave(MycroftSkill):
         """
         self.log.info("In REHEAT TIME SPECIFIC handler")
         self.state["status"] = 1
+        if "heat_mode" in message.data:
+            self.state["heat_mode"] = message.data["heat_mode"]
         self._extract_and_set_time(message.data["time"])
         self._time_display_and_update()
 
@@ -119,24 +124,28 @@ class AbrMicrowave(MycroftSkill):
     def handle_reheat_food_specific(self, message):
         """
         Handles food-specific reheat/heat commands such as
-        'heat 2 sandwiches'. Note that that timing information
+        'heat 2 sandwiches', where the user specifies the type and
+        quantity of food. Note that that timing information
         is derived from the quantity of food, if the food is part of
-        'reheat_food.entity'.
+        'reheat_food.entity'. Otherwise, a prompt asks for timing info,
+        and then adds it to the database.
+
+        TODO: Add heat_mode info to reheat_foods database.
         """
         self.log.info("In REHEAT FOOD SPECIFIC handler")
         data = message.data
         if "reheat_food" in data:
             food = data["reheat_food"]
             quantity = self._extract_number(data["quantity"])
-            time = self.reheat_food[food]  # time per unit of food
+            time = self.reheat_foods[food]  # time per unit of food
             # time = round(time * quantity)
             self.state["timer"] = time
             self.state["status"] = 1
             self._time_display_and_update()
-        elif "food" in data and data["food"] not in self.reheat_food:
+        elif "food" in data and data["food"] not in self.reheat_foods:
             food = data["food"]
             time = self.get_response(
-                f"Sorry, {food} is not in the database. Please specify the duration.",
+                f"Sorry, the specified item is not in the database. Please specify the duration.",
                 validator=self._validate_time,
                 num_retries=0,
                 on_fail="Sorry, I did not catch that",
@@ -147,14 +156,14 @@ class AbrMicrowave(MycroftSkill):
                 unit_time = round(self.state["timer"] / quantity)
                 self.state["status"] = 1
                 self._time_display_and_update()
-                # TODO: store new food info in a file so that it does not disappear
+                # TODO: store all reheat food info in a file so that it does not disappear
                 # when mycroft is restarted.
-                self.reheat_food[food] = unit_time
+                self.reheat_foods[food] = unit_time
                 self.log.info(f"Added {food} to the Reheat database.")
-        elif "food" in data and data["food"] in self.reheat_food:
+        elif "food" in data and data["food"] in self.reheat_foods:
             food = data["food"]
             quantity = self._extract_number(data["quantity"])
-            time = self.reheat_food[food]  # time per unit of food
+            time = self.reheat_foods[food]  # time per unit of food
             # time = round(time * quantity)
             self.state["timer"] = time
             self.state["status"] = 1
