@@ -31,6 +31,7 @@ class AbrMicrowave(MycroftSkill):
             "light": 0,
             "timer_change": 0,
         }
+        self.paused_state = {}
 
         # Avaialble heat/power modes
         self.heat_modes = ("low", "medium", "high")
@@ -124,7 +125,7 @@ class AbrMicrowave(MycroftSkill):
         """
         Print countdown to screen and update state["timer"].
         """
-        while self.state["timer"] > 0:
+        while self.state["timer"] >= 0:
             if self.state["status"] != 0:
                 print(
                     f"{datetime.timedelta(seconds=self.state['timer'])}",
@@ -133,6 +134,8 @@ class AbrMicrowave(MycroftSkill):
                 )
                 time.sleep(1)
                 self.state["timer"] -= 1
+            else:
+                break
         self.state["status"] = 0
 
     def _validate_time(self, text: str) -> bool:
@@ -463,13 +466,15 @@ class AbrMicrowave(MycroftSkill):
         """
         Handles commands that request to add time to the timer. This
         is to be used when the microwave or the timer is already running
-        (i.e status could be 1 or 2).
+        (i.e status is 1 or 2).
         """
 
         self.log.info("In TIMER ADD Intent")
         time = self._extract_time(message.data["time"])
         if self.state["status"] != 0:
             self.state["timer"] += time
+        else:
+            self.speak_dialog("Both microwave and timer are off.")
 
     # ------------------------------------------------ MISC Intents
 
@@ -479,8 +484,36 @@ class AbrMicrowave(MycroftSkill):
         Handles utterances that request to stop the microwave midway.
         """
         self.log.info("In STOP handler")
-        self.state["status"] = 0
         self.state["timer"] = 0
+        self.state["status"] = 0
+        self.log.info(self.state)
+
+    @intent_file_handler("pause.intent")
+    def handle_pause(self):
+        """
+        Handles requests to pause the ongoing activity (microwaving or countdown timer).
+        Stores all the relevant state variable -- everything that is needed to resume the
+        activity -- in the dict 'paused_state'.
+        """
+
+        self.log.info("In PAUSE handler")
+        if self.state["status"] != 0:
+            self.paused_state = self.state.copy()
+            self.state["timer"] = 0
+            self.state["status"] = 0
+        else:
+            self.speak_dialog("Both microwave and timer are already off.")
+
+    @intent_file_handler("resume.intent")
+    def handle_resume(self):
+        """
+        Handles requests to resume the previously paused activity.
+        """
+        self.log.info("In RESUME handler")
+        if self.state["status"] == 0 and self.paused_state:
+            self.state = self.paused_state.copy()
+            self.paused_state = {}
+            self._run_and_display_time()
 
 
 def create_skill():
