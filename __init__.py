@@ -29,6 +29,7 @@ class AbrMicrowave(MycroftSkill):
             "heat_mode": "medium",
             "timer": 0,
             "light": 0,
+            "timer_change": 0,
         }
 
         # Avaialble heat/power modes
@@ -95,10 +96,9 @@ class AbrMicrowave(MycroftSkill):
         str_num = "".join([x for x in s if x.isnumeric()])
         return round(float(str_num))
 
-    def _extract_and_set_time(self, time_entity):
+    def _extract_time(self, time_entity):
         """
-        Extract number from the input string, convert the number to
-        seconds, and update state["timer"].
+        Extract time from the string and convert it to seconds.
         """
         hrs = re.search(r"\d+ (hour|hours)", time_entity)
         hrs = self._extract_number(hrs.group()) if hrs else 0
@@ -110,15 +110,27 @@ class AbrMicrowave(MycroftSkill):
         secs = self._extract_number(secs.group()) if secs else 0
 
         total_time = (hrs * 3600) + (mins * 60) + secs
-        self.state["timer"] = total_time
+        return total_time
+
+    def _extract_and_set_time(self, time_entity):
+        """
+        Extract number from the input string, convert the number to
+        seconds, and update state["timer"].
+        """
+        time = self._extract_time(time_entity)
+        self.state["timer"] = time
 
     def _run_and_display_time(self) -> None:
         """
         Print countdown to screen and update state["timer"].
         """
-        for i in range(self.state["timer"], -1, -1):
+        while self.state["timer"] > 0:
             if self.state["status"] != 0:
-                print(f"{datetime.timedelta(seconds=i)}", end="\r", flush=True)
+                print(
+                    f"{datetime.timedelta(seconds=self.state['timer'])}",
+                    end="\r",
+                    flush=True,
+                )
                 time.sleep(1)
                 self.state["timer"] -= 1
         self.state["status"] = 0
@@ -445,6 +457,19 @@ class AbrMicrowave(MycroftSkill):
                 dialogue += " and " * min(hrs + mins, 1)
                 dialogue += f"{secs} second" + "s" * min(hrs - 1, 1)
             self.speak_dialog(f"{dialogue} left on the timer")
+
+    @intent_file_handler("timer.add.intent")
+    def timer_add_handler(self, message):
+        """
+        Handles commands that request to add time to the timer. This
+        is to be used when the microwave or the timer is already running
+        (i.e status could be 1 or 2).
+        """
+
+        self.log.info("In TIMER ADD Intent")
+        time = self._extract_time(message.data["time"])
+        if self.state["status"] != 0:
+            self.state["timer"] += time
 
     # ------------------------------------------------ MISC Intents
 
