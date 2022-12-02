@@ -59,6 +59,20 @@ class AbrMicrowave(MycroftSkill):
             "corn": 60,
         }
 
+        self.defrost_foods = {
+            "corn": 60,
+            "peas": 60,
+            "vegetables": 60,
+            "broccoli": 60,
+            "chicken": 60,
+            "ground beef": 60,
+            "salmon fillet": 60,
+            "salmon filltes": 60,
+            "pork": 60,
+            "sausage": 60,
+            "sauages": 60,
+        }
+
     def _extract_number(self, s: str) -> int:
         """
         Extract numbers from a string
@@ -101,6 +115,8 @@ class AbrMicrowave(MycroftSkill):
         self.register_entity_file("time.entity")
         self.register_entity_file("food.entity")
         self.register_entity_file("reheat_food.entity")
+        self.register_entity_file("cook_foods.entity")
+        self.register_entity_file("defrost_foods.entity")
         self.register_entity_file("quantity.entity")
 
     # ------------------------------------------------ REHEAT INTENT
@@ -227,7 +243,7 @@ class AbrMicrowave(MycroftSkill):
         self._run_and_display_time()
 
     @intent_file_handler("cook.food.specific.intent")
-    def cook_reheat_food_specific(self, message):
+    def cook_food_specific(self, message):
         """
         Handles food-specific cook/microwave commands such as
         'cook 1 sweet potato', where the user specifies the type and
@@ -241,7 +257,7 @@ class AbrMicrowave(MycroftSkill):
         self.log.info("In COOK FOOD SPECIFIC handler")
         data = message.data
         if "cook_foods" in data:
-            food = data["cook_food"]
+            food = data["cook_foods"]
             quantity = self._extract_number(data["quantity"])
             time = self.cook_foods[food]  # time per unit of food
             # time = round(time * quantity)
@@ -261,7 +277,7 @@ class AbrMicrowave(MycroftSkill):
                 unit_time = round(self.state["timer"] / quantity)
                 self.state["status"] = 1
                 self._run_and_display_time()
-                # TODO: store all reheat food info in a file so that it does not disappear
+                # TODO: store all cook food info in a file so that it does not disappear
                 # when mycroft is restarted.
                 self.cook_foods[food] = unit_time
                 self.log.info(f"Added {food} to the 'cook foods' database.")
@@ -269,6 +285,92 @@ class AbrMicrowave(MycroftSkill):
             food = data["food"]
             quantity = self._extract_number(data["quantity"])
             time = self.cook_foods[food]  # time per unit of food
+            # time = round(time * quantity)
+            self.state["timer"] = time
+            self.state["status"] = 1
+            self._run_and_display_time()
+
+    # ------------------------------------------------ Defrost Intents
+    # TODO: reheat, cook and defrost functions are all very similar. Merge?
+
+    @intent_file_handler("defrost.basic.intent")
+    def handle_defrost_basic(self, message):
+        """
+        Handles basic defrost commands that do not
+        contain any time-specific or food-specific information (food type and quantity).
+        """
+
+        self.log.info("In DEFROST BASIC handler")
+        time = self.get_response(
+            f"For how long?",
+            validator=self._validate_time,
+            num_retries=0,
+        )
+        if "heat_mode" in message.data:
+            self.state["heat_mode"] = message.data["heat_mode"]
+        if time is not None:
+            self._extract_and_set_time(time)
+            self.state["status"] = 1
+            self._run_and_display_time()
+
+    @intent_file_handler("defrost.time.specific.intent")
+    def handle_defrost_time_specific(self, message):
+        """
+        Handles time-specific defrost commands such as
+        'defrost my food for 30 seconds'. That is, it handles
+        commnads that do NOT include food specific information but include
+        timing information.
+        """
+        self.log.info("In DEFROST TIME SPECIFIC handler")
+        self.state["status"] = 1
+        if "heat_mode" in message.data:
+            self.state["heat_mode"] = message.data["heat_mode"]
+        self._extract_and_set_time(message.data["time"])
+        self._run_and_display_time()
+
+    @intent_file_handler("defrost.food.specific.intent")
+    def defrost_food_specific(self, message):
+        """
+        Handles food-specific defrost commands such as
+        'defrost 10 ounces of chicken', where the user specifies the type and
+        quantity of food. Note that that timing information
+        is derived from the quantity of food, if the food is part of
+        'defrost_foods.entity'. Otherwise, a prompt asks for timing info,
+        and then adds it to the database.
+
+        TODO: Add heat_mode info to defrost_foods database.
+        """
+        self.log.info("In DEFROST FOOD SPECIFIC handler")
+        data = message.data
+        if "defrost_foods" in data:
+            food = data["defrost_foods"]
+            quantity = self._extract_number(data["quantity"])
+            time = self.defrost_foods[food]  # time per unit of food
+            # time = round(time * quantity)
+            self.state["timer"] = time
+            self.state["status"] = 1
+            self._run_and_display_time()
+        elif "food" in data and data["food"] not in self.defrost_foods:
+            food = data["food"]
+            time = self.get_response(
+                f"Sorry, the specified item is not in the database. Please specify the duration.",
+                validator=self._validate_time,
+                num_retries=0,
+            )
+            quantity = self._extract_number(data["quantity"])
+            if time is not None:
+                self._extract_and_set_time(time)
+                unit_time = round(self.state["timer"] / quantity)
+                self.state["status"] = 1
+                self._run_and_display_time()
+                # TODO: store all defrost food info in a file so that it does not disappear
+                # when mycroft is restarted.
+                self.defrost_foods[food] = unit_time
+                self.log.info(f"Added {food} to the 'defrost foods' database.")
+        elif "food" in data and data["food"] in self.defrost_foods:
+            food = data["food"]
+            quantity = self._extract_number(data["quantity"])
+            time = self.defrost_foods[food]  # time per unit of food
             # time = round(time * quantity)
             self.state["timer"] = time
             self.state["status"] = 1
