@@ -10,12 +10,27 @@ class AbrMicrowave(MycroftSkill):
         MycroftSkill.__init__(self)
 
         # Current status of the microwave
+        """
+        status: int
+            0: microwave off
+            1: microwave on or running
+            2: microwave in timer mode
+        heat_mode: str
+            current heat mode: one of low, medium or high
+        timer: int
+            Keeps track of time in seconds. When status=1, it corresponds to running the microwave,
+            and when status=2, it is simply used as a timer (i.e with microwave off)
+        light : int
+            0: light off
+            1: ligt on
+        """
         self.state = {
-            "status": 0,  #  microwave on/off
-            "heat_mode": "medium",  # Literal["low", "medium", "high"], current heat mode
-            "timer": 0,  # int, keeps track of the cooking time in seconds
-            "light": 0,  # microwave light on/off
+            "status": 0,
+            "heat_mode": "medium",
+            "timer": 0,
+            "light": 0,
         }
+
         # Avaialble heat/power modes
         self.heat_modes = ("low", "medium", "high")
 
@@ -98,7 +113,7 @@ class AbrMicrowave(MycroftSkill):
         Print countdown to screen and update state["timer"].
         """
         for i in range(self.state["timer"], -1, -1):
-            if self.state["status"]:
+            if self.state["status"] != 0:
                 print(f"{datetime.timedelta(seconds=i)}", end="\r", flush=True)
                 time.sleep(1)
                 self.state["timer"] -= 1
@@ -375,6 +390,57 @@ class AbrMicrowave(MycroftSkill):
             self.state["timer"] = time
             self.state["status"] = 1
             self._run_and_display_time()
+
+    # ------------------------------------------------ Timer Intents
+    @intent_file_handler("timer.basic.intent")
+    def timer_basic_handler(self):
+        """
+        Handles utterances that do not contain timing information.
+        Note that the microwave remains off.
+        """
+        self.log.info("In TIMER BASIC handler")
+        time = self.get_response(
+            f"For how long?",
+            validator=self._validate_time,
+            num_retries=0,
+        )
+        if time is not None:
+            self._extract_and_set_time(time)
+            self.state["status"] = 2
+            self._run_and_display_time()
+
+    @intent_file_handler("timer.specific.intent")
+    def timer_specific_handler(self, message):
+        """
+        Handles utterances that contain timing information.
+        Note that the microwave remains off.
+        """
+        self.log.info("In TIMER SPECIFIC handler")
+        self.state["status"] = 2
+        self._extract_and_set_time(message.data["time"])
+        self._run_and_display_time()
+
+    @intent_file_handler("timer.query.intent")
+    def timer_query_intent(self, message):
+        """
+        Handles timer realted queries such as
+        'how much time is left on the timer'.
+        """
+
+        self.log.info("In TIMER QUERY intent")
+        if self.state["timer"] > 0:
+            clock_format = str(datetime.timedelta(self.state["timer"]))
+            hrs, mins, secs = [int(x) for x in clock_format.split(":")]
+            dialogue = ""
+            if hrs > 0:
+                dialogue += f"{hrs} hour" + "s" * min(hrs - 1, 1)
+            if mins > 0:
+                dialogue += ", " * min(hrs, 1)
+                dialogue += f"{mins} minutue" + "s" * min(mins - 1, 1)
+            if secs > 0:
+                dialogue += " and " * min(hrs + mins, 1)
+                dialogue += f"{secs} second" + "s" * min(hrs - 1, 1)
+            self.speak_dialog(f"{dialogue} left on the timer")
 
     # ------------------------------------------------ MISC Intents
 
