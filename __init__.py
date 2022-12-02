@@ -95,18 +95,22 @@ class AbrMicrowave(MycroftSkill):
         str_num = "".join([x for x in s if x.isnumeric()])
         return round(float(str_num))
 
-    def _extract_and_set_time(self, time_entity: str) -> None:
+    def _extract_and_set_time(self, time_entity):
         """
         Extract number from the input string, convert the number to
         seconds, and update state["timer"].
         """
-        time = self._extract_number(time_entity)
-        if "second" in time_entity:
-            self.state["timer"] = time
-        elif "minute" in time_entity:
-            self.state["timer"] = time * 60
-        elif "hour" in time_entity:
-            self.state["timer"] = time * 3600
+        hrs = re.search(r"\d+ (hour|hours)", time_entity)
+        hrs = self._extract_number(hrs.group()) if hrs else 0
+
+        mins = re.search(r"\d+ (minute|minutes)", time_entity)
+        mins = self._extract_number(mins.group()) if mins else 0
+
+        secs = re.search(r"\d+ (second|seconds)", time_entity)
+        secs = self._extract_number(secs.group()) if secs else 0
+
+        total_time = (hrs * 3600) + (mins * 60) + secs
+        self.state["timer"] = total_time
 
     def _run_and_display_time(self) -> None:
         """
@@ -421,7 +425,7 @@ class AbrMicrowave(MycroftSkill):
         self._run_and_display_time()
 
     @intent_file_handler("timer.query.intent")
-    def timer_query_intent(self, message):
+    def timer_query_intent(self):
         """
         Handles timer realted queries such as
         'how much time is left on the timer'.
