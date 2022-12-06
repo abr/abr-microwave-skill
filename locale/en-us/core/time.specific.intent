@@ -1,0 +1,4 @@
+{types_expanded} (my|the|) food for {time}
+{types_expanded} (my |the|) food for {time} on {heat_mode} (power|heat|)
+(run|start) the microwave for {time}
+(run|start) the microwave for {time} on {heat_mode} (power|heat|)

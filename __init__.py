@@ -2,6 +2,7 @@ import datetime
 import re
 import time
 
+import mycroft
 from mycroft import MycroftSkill, intent_file_handler
 
 
@@ -17,6 +18,9 @@ class AbrMicrowave(MycroftSkill):
             2: microwave in timer mode
         heat_mode: str
             current heat mode: one of low, medium or high
+        type: str
+            One of defrost, cook and reheat. This assumes that specifying the heat_level
+            and time to cook is not sufficient.
         timer: int
             Keeps track of time in seconds. When status=1, it corresponds to running the microwave,
             and when status=2, it is simply used as a timer (i.e with microwave off)
@@ -27,67 +31,86 @@ class AbrMicrowave(MycroftSkill):
         self.state = {
             "status": 0,
             "heat_mode": "medium",
+            "type": "reheat",
             "timer": 0,
             "light": 0,
-            "timer_change": 0,
         }
-        self.paused_state = {}
+        self.paused_state = (
+            {}
+        )  # used in pausing and resuming (in pause_handler and resume_handler)
 
         # Avaialble heat/power modes
-        self.heat_modes = ("low", "medium", "high")
+        self.heat_modes = ["low", "medium", "high"]
 
-        # time to reheat (in seconds) per 1 unit of food
-        # TODO: add power/heat level info
+        # food databases
+        # {"food name": [type, heat level, cooking time per unit in seconds]}
         self.reheat_foods = {
-            "coffee": 60,
-            "water": 60,
-            "milk": 60,
-            "hot chocolate": 60,
-            "apple cider": 60,
-            "soup": 60,
-            "noodle soup": 60,
-            "rice": 60,
-            "pasta": 60,
-            "mashed potatoes": 60,
-            "casserole": 60,
-            "frozen food": 60,
-            "dinner plate": 60,
-            "dinner plates": 60,
-            "burger": 60,
-            "burgers": 60,
-            "sandwich": 60,
-            "sandwiches": 60,
+            "default": ["reheat", "medium", 60],
+            "coffee": ["reheat", "medium", 60],
+            "water": ["reheat", "medium", 60],
+            "milk": ["reheat", "medium", 60],
+            "hot chocolate": ["reheat", "medium", 60],
+            "apple cider": ["reheat", "medium", 60],
+            "soup": ["reheat", "medium", 60],
+            "noodle soup": ["reheat", "medium", 60],
+            "rice": ["reheat", "medium", 60],
+            "pasta": ["reheat", "medium", 60],
+            "mashed potatoes": ["reheat", "medium", 60],
+            "casserole": ["reheat", "medium", 60],
+            "frozen food": ["reheat", "medium", 60],
+            "dinner plate": ["reheat", "medium", 60],
+            "dinner plates": ["reheat", "medium", 60],
+            "burger": ["reheat", "medium", 60],
+            "burgers": ["reheat", "medium", 60],
+            "sandwich": ["reheat", "medium", 60],
+            "sandwiches": ["reheat", "medium", 60],
         }
 
         self.cook_foods = {
-            "popcorn": 60,
-            "pop corn": 60,
-            "frozen vegetables": 60,
-            "frozen veggies": 60,
-            "broccoli": 60,
-            "oatmeal": 60,
-            "potato": 60,
-            "potatoes": 60,
-            "sweet potato": 60,
-            "sweet potatoes": 60,
-            "hot dog": 60,
-            "hot dogs": 60,
-            "corn on the cob": 60,
-            "corn": 60,
+            "default": ["cook", "high", 60],
+            "popcorn": ["cook", "high", 60],
+            "pop corn": ["cook", "high", 60],
+            "frozen vegetables": ["cook", "high", 60],
+            "frozen veggies": ["cook", "high", 60],
+            "broccoli": ["cook", "high", 60],
+            "oatmeal": ["cook", "high", 60],
+            "potato": ["cook", "high", 60],
+            "potatoes": ["cook", "high", 60],
+            "sweet potato": ["cook", "high", 60],
+            "sweet potatoes": ["cook", "high", 60],
+            "hot dog": ["cook", "high", 60],
+            "hot dogs": ["cook", "high", 60],
+            "corn on the cob": ["cook", "high", 60],
+            "corn": ["cook", "high", 60],
         }
 
         self.defrost_foods = {
-            "corn": 60,
-            "peas": 60,
-            "vegetables": 60,
-            "broccoli": 60,
-            "chicken": 60,
-            "ground beef": 60,
-            "salmon fillet": 60,
-            "salmon filltes": 60,
-            "pork": 60,
-            "sausage": 60,
-            "sauages": 60,
+            "default": ["defrost", "low", 60],
+            "corn": ["defrost", "low", 60],
+            "peas": ["defrost", "low", 60],
+            "vegetables": ["defrost", "low", 60],
+            "broccoli": ["defrost", "low", 60],
+            "chicken": ["defrost", "low", 60],
+            "ground beef": ["defrost", "low", 60],
+            "salmon fillet": ["defrost", "low", 60],
+            "salmon filltes": ["defrost", "low", 60],
+            "pork": ["defrost", "low", 60],
+            "sausage": ["defrost", "low", 60],
+            "sauages": ["defrost", "low", 60],
+        }
+
+        self.foods = {
+            "defrost": self.defrost_foods,
+            "cook": self.cook_foods,
+            "reheat": self.reheat_foods,
+        }
+
+        self.types_expanded = {
+            "heat": "reheat",
+            "reheat": "reheat",
+            "cook": "cook",
+            "microwave": "cook",
+            "defrost": "defrost",
         }
 
     def _extract_number(self, s: str) -> int:
@@ -121,9 +144,18 @@ class AbrMicrowave(MycroftSkill):
         time = self._extract_time(time_entity)
         self.state["timer"] = time
 
+    def _set_state_to_default(self):
+        self.state["status"] = 0
+        self.state["heat_mode"] = "medium"
+        self.state["type"] = "reheat"
+        self.state["timer"] = 0
+        self.state["light"] = 0
+
     def _run_and_display_time(self) -> None:
         """
         Print countdown to screen and update state["timer"].
+        Note the when the loop exits or if status changes while the function is running,
+        the 'set_state_to_default' is called.
         """
         while self.state["timer"] >= 0:
             if self.state["status"] != 0:
@@ -135,8 +167,29 @@ class AbrMicrowave(MycroftSkill):
                 time.sleep(1)
                 self.state["timer"] -= 1
             else:
+                self._set_state_to_default()
                 break
-        self.state["status"] = 0
+        self._set_state_to_default()
+
+    def _validate_new_item(self, text: str) -> bool:
+        if text:
+            return True
+        return False
+
+    def _validate_heat_level(self, text: str) -> bool:
+        _, score = mycroft.util.parse.match_one(text, self.heat_modes)
+        if score > 0.5:
+            return True
+        return False
+
+    def initialize(self):
+        self.register_entity_file("time.entity")
+        self.register_entity_file("types_expanded.entity")
+        self.register_entity_file("type.entity")
+        self.register_entity_file("foods.entity")
+        self.register_entity_file("quantity.entity")
+
+    # ------------------------------------------------ Cook/Reheat/Defrost Intents
 
     def _validate_time(self, text: str) -> bool:
         match = re.search(r"\d+ (second|minute|hour)s?", text)
@@ -145,270 +198,90 @@ class AbrMicrowave(MycroftSkill):
             return True
         return False
 
-    def initialize(self):
-        self.register_entity_file("time.entity")
-        self.register_entity_file("food.entity")
-        self.register_entity_file("reheat_food.entity")
-        self.register_entity_file("cook_foods.entity")
-        self.register_entity_file("defrost_foods.entity")
-        self.register_entity_file("quantity.entity")
-
-    # ------------------------------------------------ REHEAT INTENT
-
-    @intent_file_handler("reheat.basic.intent")
-    def handle_reheat_basic(self, message):
+    @intent_file_handler("basic.intent")
+    def handle_basic(self, message):
         """
-        Handles basic reheat/heat commands that do not
+        Handles basic cook/reheat/defrost commands that do not
         contain any time-specific or food-specific information (food type and quantity).
-        """
-        self.log.info("In REHEAT BASIC handler")
-        self.log.info(message.data)
-        time = self.get_response(
-            f"For how long?",
-            validator=self._validate_time,
-            num_retries=0,
-            on_fail="Sorry, I did not catch that",
-        )
-        if "heat_mode" in message.data:
-            self.state["heat_mode"] = message.data["heat_mode"]
-        if time is not None:
-            self._extract_and_set_time(time)
-            self.state["status"] = 1
-            self._run_and_display_time()
-
-    @intent_file_handler("reheat.time.specific.intent")
-    def handle_reheat_time_specific(self, message):
-        """
-        Handles time-specific reheat/heat commands such as
-        'heat my food for 30 seconds'. That is, it handles
-        commnads that do NOT include food specific information but include
-        timing information.
-        """
-        self.log.info("In REHEAT TIME SPECIFIC handler")
-        self.state["status"] = 1
-        if "heat_mode" in message.data:
-            self.state["heat_mode"] = message.data["heat_mode"]
-        self._extract_and_set_time(message.data["time"])
-        self._run_and_display_time()
-
-    @intent_file_handler("reheat.food.specific.intent")
-    def handle_reheat_food_specific(self, message):
-        """
-        Handles food-specific reheat/heat commands such as
-        'heat 2 sandwiches', where the user specifies the type and
-        quantity of food. Note that that timing information
-        is derived from the quantity of food, if the food is part of
-        'reheat_food.entity'. Otherwise, a prompt asks for timing info,
-        and then adds it to the database.
-
-        TODO: Add heat_mode info to reheat_foods database.
-        """
-        self.log.info("In REHEAT FOOD SPECIFIC handler")
-        data = message.data
-        if "reheat_food" in data:
-            food = data["reheat_food"]
-            quantity = self._extract_number(data["quantity"])
-            time = self.reheat_foods[food]  # time per unit of food
-            # time = round(time * quantity)
-            self.state["timer"] = time
-            self.state["status"] = 1
-            self._run_and_display_time()
-        elif "food" in data and data["food"] not in self.reheat_foods:
-            food = data["food"]
-            time = self.get_response(
-                f"Sorry, the specified item is not in the database. Please specify the duration.",
-                validator=self._validate_time,
-                num_retries=0,
-                on_fail="Sorry, I did not catch that",
-            )
-            quantity = self._extract_number(data["quantity"])
-            if time is not None:
-                self._extract_and_set_time(time)
-                unit_time = round(self.state["timer"] / quantity)
-                self.state["status"] = 1
-                self._run_and_display_time()
-                # TODO: store all reheat food info in a file so that it does not disappear
-                # when mycroft is restarted.
-                self.reheat_foods[food] = unit_time
-                self.log.info(f"Added {food} to the Reheat database.")
-        elif "food" in data and data["food"] in self.reheat_foods:
-            food = data["food"]
-            quantity = self._extract_number(data["quantity"])
-            time = self.reheat_foods[food]  # time per unit of food
-            # time = round(time * quantity)
-            self.state["timer"] = time
-            self.state["status"] = 1
-            self._run_and_display_time()
-
-    # ------------------------------------------------ Cook Intents
-    @intent_file_handler("cook.basic.intent")
-    def handle_cook_basic(self, message):
-        """
-        Handles basic cook/microwave commands that do not
-        contain any time-specific or food-specific information (food type and quantity).
+        Examples: run the microwave, cook my food, heat my food.
         """
 
-        self.log.info("In COOK BASIC handler")
+        self.log.info("In BASIC handler")
+
+        if "types_expanded" in message.data:
+            type_ = self.types_expanded[message.data["types_expanded"]]
+        else:
+            type_ = "reheat"
+
         time = self.get_response(
             f"For how long?",
             validator=self._validate_time,
             num_retries=0,
         )
+
         if "heat_mode" in message.data:
             self.state["heat_mode"] = message.data["heat_mode"]
+        else:
+            self.state["heat_mode"] = self.foods[type_]["default"][1]
+
         if time is not None:
             self._extract_and_set_time(time)
             self.state["status"] = 1
+            self.state["type"] = type_
+            self.log.info(self.state)
             self._run_and_display_time()
 
-    @intent_file_handler("cook.time.specific.intent")
-    def handle_cook_time_specific(self, message):
-        """
-        Handles time-specific cook/microwave commands such as
-        'cook my food for 30 seconds'. That is, it handles
-        commnads that do NOT include food specific information but include
-        timing information.
-        """
-        self.log.info("In COOK TIME SPECIFIC handler")
-        self.state["status"] = 1
-        if "heat_mode" in message.data:
-            self.state["heat_mode"] = message.data["heat_mode"]
-        self._extract_and_set_time(message.data["time"])
-        self._run_and_display_time()
-
-    @intent_file_handler("cook.food.specific.intent")
-    def cook_food_specific(self, message):
-        """
-        Handles food-specific cook/microwave commands such as
-        'cook 1 sweet potato', where the user specifies the type and
-        quantity of food. Note that that timing information
-        is derived from the quantity of food, if the food is part of
-        'cook_foods.entity'. Otherwise, a prompt asks for timing info,
-        and then adds it to the database.
-
-        TODO: Add heat_mode info to cook_foods database.
-        """
-        self.log.info("In COOK FOOD SPECIFIC handler")
-        data = message.data
-        if "cook_foods" in data:
-            food = data["cook_foods"]
-            quantity = self._extract_number(data["quantity"])
-            time = self.cook_foods[food]  # time per unit of food
-            # time = round(time * quantity)
-            self.state["timer"] = time
-            self.state["status"] = 1
-            self._run_and_display_time()
-        elif "food" in data and data["food"] not in self.cook_foods:
-            food = data["food"]
-            time = self.get_response(
-                f"Sorry, the specified item is not in the database. Please specify the duration.",
-                validator=self._validate_time,
-                num_retries=0,
-            )
-            quantity = self._extract_number(data["quantity"])
-            if time is not None:
-                self._extract_and_set_time(time)
-                unit_time = round(self.state["timer"] / quantity)
-                self.state["status"] = 1
-                self._run_and_display_time()
-                # TODO: store all cook food info in a file so that it does not disappear
-                # when mycroft is restarted.
-                self.cook_foods[food] = unit_time
-                self.log.info(f"Added {food} to the 'cook foods' database.")
-        elif "food" in data and data["food"] in self.cook_foods:
-            food = data["food"]
-            quantity = self._extract_number(data["quantity"])
-            time = self.cook_foods[food]  # time per unit of food
-            # time = round(time * quantity)
-            self.state["timer"] = time
-            self.state["status"] = 1
-            self._run_and_display_time()
-
-    # ------------------------------------------------ Defrost Intents
-    # TODO: reheat, cook and defrost functions are all very similar. Merge?
-
-    @intent_file_handler("defrost.basic.intent")
-    def handle_defrost_basic(self, message):
-        """
-        Handles basic defrost commands that do not
-        contain any time-specific or food-specific information (food type and quantity).
-        """
-
-        self.log.info("In DEFROST BASIC handler")
-        time = self.get_response(
-            f"For how long?",
-            validator=self._validate_time,
-            num_retries=0,
-        )
-        if "heat_mode" in message.data:
-            self.state["heat_mode"] = message.data["heat_mode"]
-        if time is not None:
-            self._extract_and_set_time(time)
-            self.state["status"] = 1
-            self._run_and_display_time()
-
-    @intent_file_handler("defrost.time.specific.intent")
-    def handle_defrost_time_specific(self, message):
+    @intent_file_handler("time.specific.intent")
+    def handle_time_specific(self, message):
         """
         Handles time-specific defrost commands such as
-        'defrost my food for 30 seconds'. That is, it handles
+        'defrost/cook/heat my food for 30 seconds'. That is, it handles
         commnads that do NOT include food specific information but include
         timing information.
         """
-        self.log.info("In DEFROST TIME SPECIFIC handler")
-        self.state["status"] = 1
+        self.log.info("In TIME SPECIFIC handler")
+
+        if "types_expanded" in message.data:
+            type_ = self.types_expanded[message.data["types_expanded"]]
+        else:
+            type_ = "reheat"
+
         if "heat_mode" in message.data:
             self.state["heat_mode"] = message.data["heat_mode"]
+        else:
+            self.state["heat_mode"] = self.foods[type_]["default"][1]
+
         self._extract_and_set_time(message.data["time"])
+        self.state["status"] = 1
+        self.state["type"] = type_
+        self.log.info(self.state)
         self._run_and_display_time()
 
-    @intent_file_handler("defrost.food.specific.intent")
-    def defrost_food_specific(self, message):
+    @intent_file_handler("food.specific.intent")
+    def handle_food_specific(self, message):
         """
         Handles food-specific defrost commands such as
-        'defrost 10 ounces of chicken', where the user specifies the type and
+        'defrost/cook/heat 10 ounces of chicken', where the user specifies the type and
         quantity of food. Note that that timing information
         is derived from the quantity of food, if the food is part of
-        'defrost_foods.entity'. Otherwise, a prompt asks for timing info,
+        'foods.entity'. Otherwise, a prompt asks for timing info,
         and then adds it to the database.
-
-        TODO: Add heat_mode info to defrost_foods database.
         """
-        self.log.info("In DEFROST FOOD SPECIFIC handler")
-        data = message.data
-        if "defrost_foods" in data:
-            food = data["defrost_foods"]
-            quantity = self._extract_number(data["quantity"])
-            time = self.defrost_foods[food]  # time per unit of food
-            # time = round(time * quantity)
-            self.state["timer"] = time
-            self.state["status"] = 1
-            self._run_and_display_time()
-        elif "food" in data and data["food"] not in self.defrost_foods:
-            food = data["food"]
-            time = self.get_response(
-                f"Sorry, the specified item is not in the database. Please specify the duration.",
-                validator=self._validate_time,
-                num_retries=0,
-            )
-            quantity = self._extract_number(data["quantity"])
-            if time is not None:
-                self._extract_and_set_time(time)
-                unit_time = round(self.state["timer"] / quantity)
-                self.state["status"] = 1
-                self._run_and_display_time()
-                # TODO: store all defrost food info in a file so that it does not disappear
-                # when mycroft is restarted.
-                self.defrost_foods[food] = unit_time
-                self.log.info(f"Added {food} to the 'defrost foods' database.")
-        elif "food" in data and data["food"] in self.defrost_foods:
-            food = data["food"]
-            quantity = self._extract_number(data["quantity"])
-            time = self.defrost_foods[food]  # time per unit of food
-            # time = round(time * quantity)
-            self.state["timer"] = time
-            self.state["status"] = 1
-            self._run_and_display_time()
+        self.log.info("In FOOD SPECIFIC handler")
+        if "types_expanded" in message.data:
+            type_ = self.types_expanded[message.data["types_expanded"]]
+        else:
+            type_ = "reheat"
+        food = message.data["foods"]
+        quantity = self._extract_number(message.data["quantity"])
+        time = round(self.foods[type_][food][2] * quantity)  # time per unit of food
+
+        self.state["timer"] = time
+        self.state["status"] = 1
+        self.state["type"] = type_
+        self.state["heat_mode"] = self.foods["type"][food][1]
+        self.log.info(self.state)
+        self._run_and_display_time()
 
     # ------------------------------------------------ Timer Intents
     @intent_file_handler("timer.basic.intent")
@@ -476,6 +349,53 @@ class AbrMicrowave(MycroftSkill):
         else:
             self.speak_dialog("Both microwave and timer are off.")
 
+    # ------------------------------------------------ Personalization Intents
+
+    def _validate_time_quantity_info(self, s: str):
+        match = re.search(r"\d+ \w+ for \d+", s)
+        if match:
+            return True
+        return False
+
+    @intent_file_handler("add.new.item.intent")
+    def handle_add_new_item(self, message):
+        """
+        Handles utterances that want to add a new food item to the database.
+        Each new item requires the specification of the following information:
+        1. reheat/cook/defrost
+        2. low/medium/high (assuming here that the type of microwaving listed above does a bit more
+        than simply setting that heat or power level).
+        3. time (in seconds) per unit of food.
+        """
+
+        item_name = self.get_response(
+            f"What you like to call the new item?",
+            validator=self._validate_new_item,
+            num_retries=0,
+        )
+        if not "type" in message.data:
+            self.speak_dialog("Please select type")
+            type = self.ask_selection(["cook", "defrost", "reheat"])
+        else:
+            type = message.data["type"]
+        if item_name and type:
+            time_info = self.get_response(
+                f"""Please set the time to {type} in the following format: X weight for Y time, for example, you could say something like '100 ounces for 2 minutes and 30 seconds.'""",
+                validator=self._validate_time_quantity_info,
+                num_retries=0,
+            )
+            if time_info:
+                quantity = self._extract_number(time_info.split("for")[0])
+                time = round(self._extract_number(time_info.split("for")[1]))
+                unit_time = time / quantity
+                self.speak_dialog(f"At what heat level would you like to {type}")
+                heat_level = self.ask_selection(self.heat_modes)
+
+                if heat_level:
+                    self.foods[type][item_name] = [type, heat_level, unit_time]
+                    self.log.info(f"{item_name}, {self.foods[type][item_name]}")
+                    self.speak_dialog(f"You are all set!")
+
     # ------------------------------------------------ MISC Intents
 
     @intent_file_handler("stop.intent")
@@ -484,23 +404,23 @@ class AbrMicrowave(MycroftSkill):
         Handles utterances that request to stop the microwave midway.
         """
         self.log.info("In STOP handler")
-        self.state["timer"] = 0
         self.state["status"] = 0
+        self.state["timer"] = 0
         self.log.info(self.state)
 
     @intent_file_handler("pause.intent")
     def handle_pause(self):
         """
         Handles requests to pause the ongoing activity (microwaving or countdown timer).
-        Stores all the relevant state variable -- everything that is needed to resume the
+        Stores all the relevant state variables -- everything that is needed to resume the
         activity -- in the dict 'paused_state'.
         """
 
         self.log.info("In PAUSE handler")
         if self.state["status"] != 0:
             self.paused_state = self.state.copy()
-            self.state["timer"] = 0
             self.state["status"] = 0
+            self.state["timer"] = 0
         else:
             self.speak_dialog("Both microwave and timer are already off.")
 
