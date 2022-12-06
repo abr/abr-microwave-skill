@@ -41,6 +41,8 @@ class AbrMicrowave(MycroftSkill):
         self.heat_modes = ["low", "medium", "high"]
 
         # food databases
+        # TODO: this should be loaded from a file so that the new additions
+        # do not disappear when the system is restarted.
         # {"food name": [type, heat level, cooking time per unit in seconds]}
         self.reheat_foods = {
             "default": ["reheat", "medium", 60],
@@ -386,7 +388,8 @@ class AbrMicrowave(MycroftSkill):
                 self.speak_dialogue("Ok")
         if item_name and type:
             time_info = self.get_response(
-                f"""Please set the time to {type} in the following format: X weight for Y time, for example, you could say something like '100 ounces for 2 minutes and 30 seconds.'""",
+                f"""Please set the time to {type} in the following format: X weight for Y time,\
+                    for example, you could say something like '100 ounces for 2 minutes and 30 seconds.'""",
                 validator=self._validate_time_quantity_info,
                 num_retries=0,
             )
