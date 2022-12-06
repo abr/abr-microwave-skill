@@ -10,7 +10,7 @@ class AbrMicrowave(MycroftSkill):
     def __init__(self):
         MycroftSkill.__init__(self)
 
-        # Current status of the microwave
+        # Current state of the microwave
         """
         status: int
             0: microwave off
@@ -18,22 +18,20 @@ class AbrMicrowave(MycroftSkill):
             2: microwave in timer mode
         heat_mode: str
             current heat mode: one of low, medium or high
-        type: str
-            One of defrost, cook and reheat. This assumes that specifying the heat_level
-            and time to cook is not sufficient.
+        type: Optional[str]
+            One of defrost, cook, reheat or None. None is used when the we use the microwave
+            as a timer. Here, we assume that specifying the heat_level
+            and time to cook is not sufficient and that the 'type' specification carries additional
+            information.
         timer: int
             Keeps track of time in seconds. When status=1, it corresponds to running the microwave,
             and when status=2, it is simply used as a timer (i.e with microwave off)
-        light : int
-            0: light off
-            1: ligt on
         """
         self.state = {
             "status": 0,
             "heat_mode": "medium",
-            "type": "reheat",
+            "type": None,
             "timer": 0,
-            "light": 0,
         }
         self.paused_state = (
             {}
@@ -147,9 +145,8 @@ class AbrMicrowave(MycroftSkill):
     def _set_state_to_default(self):
         self.state["status"] = 0
         self.state["heat_mode"] = "medium"
-        self.state["type"] = "reheat"
+        self.state["type"] = None
         self.state["timer"] = 0
-        self.state["light"] = 0
 
     def _run_and_display_time(self) -> None:
         """
@@ -299,6 +296,7 @@ class AbrMicrowave(MycroftSkill):
         if time is not None:
             self._extract_and_set_time(time)
             self.state["status"] = 2
+            self.state["status"] = None
             self._run_and_display_time()
 
     @intent_file_handler("timer.specific.intent")
@@ -321,7 +319,7 @@ class AbrMicrowave(MycroftSkill):
 
         self.log.info("In TIMER QUERY intent")
         if self.state["timer"] > 0:
-            clock_format = str(datetime.timedelta(self.state["timer"]))
+            clock_format = str(datetime.timedelta(seconds=self.state["timer"]))
             hrs, mins, secs = [int(x) for x in clock_format.split(":")]
             dialogue = ""
             if hrs > 0:
@@ -369,15 +367,23 @@ class AbrMicrowave(MycroftSkill):
         """
 
         item_name = self.get_response(
-            f"What you like to call the new item?",
+            f"What would you like to call the new item?",
             validator=self._validate_new_item,
             num_retries=0,
         )
         if not "type" in message.data:
-            self.speak_dialog("Please select type")
+            self.speak_dialog("Please specify what you would like to do with it")
             type = self.ask_selection(["cook", "defrost", "reheat"])
         else:
             type = message.data["type"]
+        if item_name in self.foods[type]:
+            proceed = self.ask_yesno(
+                f"The item is already in {type} database, would you like to modify it?"
+            )
+            if proceed == "no":
+                return
+            else:
+                self.speak_dialogue("Ok")
         if item_name and type:
             time_info = self.get_response(
                 f"""Please set the time to {type} in the following format: X weight for Y time, for example, you could say something like '100 ounces for 2 minutes and 30 seconds.'""",
@@ -404,8 +410,7 @@ class AbrMicrowave(MycroftSkill):
         Handles utterances that request to stop the microwave midway.
         """
         self.log.info("In STOP handler")
-        self.state["status"] = 0
-        self.state["timer"] = 0
+        self._set_state_to_default()
         self.log.info(self.state)
 
     @intent_file_handler("pause.intent")
@@ -419,8 +424,7 @@ class AbrMicrowave(MycroftSkill):
         self.log.info("In PAUSE handler")
         if self.state["status"] != 0:
             self.paused_state = self.state.copy()
-            self.state["status"] = 0
-            self.state["timer"] = 0
+            self._set_state_to_default()
         else:
             self.speak_dialog("Both microwave and timer are already off.")
 
