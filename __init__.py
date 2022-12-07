@@ -1,4 +1,5 @@
 import datetime
+import json
 import re
 import time
 
@@ -44,67 +45,20 @@ class AbrMicrowave(MycroftSkill):
         # TODO: this should be loaded from a file so that the new additions
         # do not disappear when the system is restarted.
         # {"food name": [type, heat level, cooking time per unit in seconds]}
-        self.reheat_foods = {
-            "default": ["reheat", "medium", 60],
-            "coffee": ["reheat", "medium", 60],
-            "water": ["reheat", "medium", 60],
-            "milk": ["reheat", "medium", 60],
-            "hot chocolate": ["reheat", "medium", 60],
-            "apple cider": ["reheat", "medium", 60],
-            "soup": ["reheat", "medium", 60],
-            "noodle soup": ["reheat", "medium", 60],
-            "rice": ["reheat", "medium", 60],
-            "pasta": ["reheat", "medium", 60],
-            "mashed potatoes": ["reheat", "medium", 60],
-            "casserole": ["reheat", "medium", 60],
-            "frozen food": ["reheat", "medium", 60],
-            "dinner plate": ["reheat", "medium", 60],
-            "dinner plates": ["reheat", "medium", 60],
-            "burger": ["reheat", "medium", 60],
-            "burgers": ["reheat", "medium", 60],
-            "sandwich": ["reheat", "medium", 60],
-            "sandwiches": ["reheat", "medium", 60],
-        }
 
-        self.cook_foods = {
-            "default": ["cook", "high", 60],
-            "popcorn": ["cook", "high", 60],
-            "pop corn": ["cook", "high", 60],
-            "frozen vegetables": ["cook", "high", 60],
-            "frozen veggies": ["cook", "high", 60],
-            "broccoli": ["cook", "high", 60],
-            "oatmeal": ["cook", "high", 60],
-            "potato": ["cook", "high", 60],
-            "potatoes": ["cook", "high", 60],
-            "sweet potato": ["cook", "high", 60],
-            "sweet potatoes": ["cook", "high", 60],
-            "hot dog": ["cook", "high", 60],
-            "hot dogs": ["cook", "high", 60],
-            "corn on the cob": ["cook", "high", 60],
-            "corn": ["cook", "high", 60],
-        }
+        # load food details from self.file_system.path
+        self.foods_path = self.file_system.path + "/foods.json"
+        with open(self.foods_path) as f:
+            foods_ = json.load(f)
 
-        self.defrost_foods = {
-            "default": ["defrost", "low", 60],
-            "corn": ["defrost", "low", 60],
-            "peas": ["defrost", "low", 60],
-            "vegetables": ["defrost", "low", 60],
-            "broccoli": ["defrost", "low", 60],
-            "chicken": ["defrost", "low", 60],
-            "ground beef": ["defrost", "low", 60],
-            "salmon fillet": ["defrost", "low", 60],
-            "salmon filltes": ["defrost", "low", 60],
-            "pork": ["defrost", "low", 60],
-            "sausage": ["defrost", "low", 60],
-            "sauages": ["defrost", "low", 60],
-        }
-
+        self.reheat_foods = foods_["reheat"]
+        self.cook_foods = foods_["cook"]
+        self.defrost_foods = foods_["defrost"]
         self.foods = {
-            "defrost": self.defrost_foods,
             "cook": self.cook_foods,
             "reheat": self.reheat_foods,
+            "defrost": self.defrost_foods,
         }
-
         self.types_expanded = {
             "heat": "reheat",
             "reheat": "reheat",
@@ -273,14 +227,18 @@ class AbrMicrowave(MycroftSkill):
             type_ = "reheat"
         food = message.data["foods"]
         quantity = self._extract_number(message.data["quantity"])
-        time = round(self.foods[type_][food][2] * quantity)  # time per unit of food
-
-        self.state["timer"] = time
-        self.state["status"] = 1
-        self.state["type"] = type_
-        self.state["heat_mode"] = self.foods["type"][food][1]
-        self.log.info(self.state)
-        self._run_and_display_time()
+        if food in self.foods[type_]:
+            time = round(self.foods[type_][food][2] * quantity)  # time per unit of food
+            self.state["timer"] = time
+            self.state["status"] = 1
+            self.state["type"] = type_
+            self.state["heat_mode"] = self.foods[type_][food][1]
+            self.log.info(self.state)
+            self._run_and_display_time()
+        else:
+            self.speak_dialog(
+                f"The specified item is not part of the {type_} database."
+            )
 
     # ------------------------------------------------ Timer Intents
     @intent_file_handler("timer.basic.intent")
@@ -385,7 +343,7 @@ class AbrMicrowave(MycroftSkill):
             if proceed == "no":
                 return
             else:
-                self.speak_dialogue("Ok")
+                self.speak_dialog("Ok")
         if item_name and type:
             time_info = self.get_response(
                 f"""Please set the time to {type} in the following format: X weight for Y time,\
@@ -395,7 +353,7 @@ class AbrMicrowave(MycroftSkill):
             )
             if time_info:
                 quantity = self._extract_number(time_info.split("for")[0])
-                time = round(self._extract_number(time_info.split("for")[1]))
+                time = round(self._extract_time(time_info.split("for")[1]))
                 unit_time = time / quantity
                 self.speak_dialog(f"At what heat level would you like to {type}")
                 heat_level = self.ask_selection(self.heat_modes)
@@ -403,6 +361,13 @@ class AbrMicrowave(MycroftSkill):
                 if heat_level:
                     self.foods[type][item_name] = [type, heat_level, unit_time]
                     self.log.info(f"{item_name}, {self.foods[type][item_name]}")
+                    with open(
+                        "/opt/mycroft/skills/abr-microwave-skill/locale/en-us/misc/foods.entity",
+                        "a",
+                    ) as myfile:
+                        myfile.write(f"\n{item_name}\n")
+                    with open(self.foods_path, "w") as outfile:
+                        json.dump(self.foods, outfile, indent=4)
                     self.speak_dialog(f"You are all set!")
 
     # ------------------------------------------------ MISC Intents
