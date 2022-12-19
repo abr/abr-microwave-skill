@@ -101,6 +101,10 @@ class AbrMicrowave(MycroftSkill):
         self.state["type"] = None
         self.state["timer"] = 0
 
+    def write_state_to_json(self):
+        with open("/home/nchilkur/Desktop/messages.json", "w") as f:
+            json.dump(self.state, f)
+
     def _run_and_display_time(self) -> None:
         """
         Print countdown to screen and update state["timer"].
@@ -114,6 +118,7 @@ class AbrMicrowave(MycroftSkill):
                     end="\r",
                     flush=True,
                 )
+                self.write_state_to_json()
                 time.sleep(1)
                 self.state["timer"] -= 1
             else:
@@ -122,6 +127,7 @@ class AbrMicrowave(MycroftSkill):
                 break
         self.acknowledge()
         self._set_state_to_default()
+        self.write_state_to_json()
 
     def _validate_new_item(self, text: str) -> bool:
         if text:
@@ -378,6 +384,7 @@ class AbrMicrowave(MycroftSkill):
         """
         self.log.info("In STOP handler")
         self._set_state_to_default()
+        self.write_state_to_json()
         self.log.info(self.state)
 
     @intent_file_handler("pause.intent")
