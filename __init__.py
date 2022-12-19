@@ -42,11 +42,8 @@ class AbrMicrowave(MycroftSkill):
         self.heat_modes = ["low", "medium", "high"]
 
         # food databases
-        # TODO: this should be loaded from a file so that the new additions
-        # do not disappear when the system is restarted.
         # {"food name": [type, heat level, cooking time per unit in seconds]}
-
-        # load food details from self.file_system.path
+        # load food details from self.file_system.path/foods.json
         self.foods_path = self.file_system.path + "/foods.json"
         with open(self.foods_path) as f:
             foods_ = json.load(f)
@@ -120,8 +117,10 @@ class AbrMicrowave(MycroftSkill):
                 time.sleep(1)
                 self.state["timer"] -= 1
             else:
+                self.acknowledge()
                 self._set_state_to_default()
                 break
+        self.acknowledge()
         self._set_state_to_default()
 
     def _validate_new_item(self, text: str) -> bool:
