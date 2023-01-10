@@ -36,8 +36,8 @@ class AbrMicrowave(MycroftSkill):
         }
         self.paused_state = (
             {}
-        )  # used in pausing and resuming (in pause_handler and resume_handler)
-
+        )  
+        # used in pausing and resuming (in pause_handler and resume_handler)
         # Avaialble heat/power modes
         self.heat_modes = ["low", "medium", "high"]
 
@@ -45,6 +45,7 @@ class AbrMicrowave(MycroftSkill):
         # {"food name": [type, heat level, cooking time per unit in seconds]}
         # load food details from self.file_system.path/foods.json
         self.foods_path = self.file_system.path + "/foods.json"
+        self.messages_path = self.file_system.path + "/messages.json"
         with open(self.foods_path) as f:
             foods_ = json.load(f)
 
@@ -102,7 +103,7 @@ class AbrMicrowave(MycroftSkill):
         self.state["timer"] = 0
 
     def write_state_to_json(self):
-        with open("/home/nchilkur/Desktop/messages.json", "w") as f:
+        with open(self.messages_path, "w") as f:
             json.dump(self.state, f)
 
     def _run_and_display_time(self) -> None:
